@@ -1,6 +1,6 @@
 // Pantallas exclusivas de la versión personal: bloqueo, seguridad, respaldo en Google Sheets y borrado de datos.
 import * as E from './engine.js';
-import { sheetsConfig, testConnection, backupNow, fetchRemoteBackup } from './sheets.js';
+import { sheetsConfig, testConnection, backupNow, fetchRemoteBackup, SheetsConflict } from './sheets.js';
 import { icon, esc, hint, busy, toast, confirmDialog, formError, clearFormError, download, fmtDate } from '../ui.js';
 import { getLang, setLang, L } from '../i18n.js';
 
@@ -119,6 +119,12 @@ export function sheetsSection() {
       <div class="row wrap" style="gap:6px;margin-bottom:10px"><span class="chip mint">${icon('check')} Conectado</span>
         ${cfg.lastAt ? `<span class="chip gray">Último respaldo: ${esc(when(cfg.lastAt))}</span>` : '<span class="chip amber">Aún sin respaldo</span>'}
         ${cfg.lastError ? `<span class="chip rose">Último intento falló: ${esc(cfg.lastError)}</span>` : ''}</div>
+      ${cfg.conflict ? `<div class="glass card tight" style="background:var(--amber-soft);margin-bottom:12px">
+        <div class="small"><b>${icon('alert')} Respaldo en pausa.</b> El ${esc(when(cfg.conflict.fecha))} otro dispositivo (${esc(cfg.conflict.nombre)}) guardó datos en esta hoja. Para no borrar nada, elige qué hacer:</div>
+        <div class="stack" style="margin-top:10px">
+          <button class="btn btn-primary" data-resolve="pull">${icon('download')} Traer los datos de la hoja a este teléfono</button>
+          <button class="btn" data-resolve="push">${icon('upload')} Reemplazar la hoja con los datos de este teléfono</button></div>
+        ${hint('Traer: este teléfono queda igual que la hoja. Reemplazar: la hoja queda igual que este teléfono y lo que guardó el otro dispositivo deja de estar en la hoja.')}</div>` : ''}
       <label class="check"><input type="checkbox" data-auto ${cfg.auto ? 'checked' : ''}> Respaldar automáticamente después de cada cambio</label>
       <div class="stack" style="margin-top:12px">
         <button class="btn btn-primary" data-backup-now>${icon('upload')} Respaldar ahora</button>
@@ -150,15 +156,21 @@ export function bindSheets(main, rerender) {
         const r = await testConnection(url, clave);
         E.setSetting('sheets', { url, clave, auto: true, lastAt: null });
         toast(L(`Conectado a «${r.hoja}». Haciendo el primer respaldo…`, `Connected to “${r.hoja}”. Running the first backup…`));
-        await backupNow();
-        toast(L('Respaldo guardado en Google Sheets.', 'Backup saved to Google Sheets.'));
+        try {
+          await backupNow();
+          toast(L('Respaldo guardado en Google Sheets.', 'Backup saved to Google Sheets.'));
+        } catch (err) {
+          if (!(err instanceof SheetsConflict)) throw err;
+          toast(L('Esta hoja ya tiene datos de otro dispositivo. Elige qué hacer.', 'This sheet already has data from another device. Choose what to do.'));
+        }
         rerender();
       } catch (err) { formError(form, err); }
     });
   });
   box.querySelector('[data-auto]')?.addEventListener('change', (e) => { E.setSetting('sheets', { ...sheetsConfig(), auto: e.target.checked }); });
   box.querySelector('[data-backup-now]')?.addEventListener('click', (e) => busy(e.currentTarget, async () => {
-    try { await backupNow(); toast(L('Respaldo guardado en Google Sheets.', 'Backup saved to Google Sheets.')); } catch (err) { toast(err.message, { error: true }); }
+    try { await backupNow(); toast(L('Respaldo guardado en Google Sheets.', 'Backup saved to Google Sheets.')); }
+    catch (err) { if (!(err instanceof SheetsConflict)) toast(err.message, { error: true }); }
     rerender();
   }));
   box.querySelector('[data-disconnect]')?.addEventListener('click', async () => {
@@ -173,7 +185,18 @@ export function bindSheets(main, rerender) {
       toast(L('Código copiado. Pégalo en Apps Script.', 'Code copied. Paste it into Apps Script.'));
     } catch { toast(L('No se pudo copiar. Abre la guía para verlo.', 'Couldn’t copy. Open the guide to see it.'), { error: true }); }
   });
-  box.querySelectorAll('[data-restore-sheets]').forEach((b) => b.addEventListener('click', async () => {
+  box.querySelector('[data-resolve="push"]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const ok = await confirmDialog({ title: L('Reemplazar la hoja', 'Replace the sheet'),
+      text: L('La hoja quedará con los datos de este teléfono. Lo que guardó el otro dispositivo dejará de estar en la hoja (seguirá en ese dispositivo).', 'The sheet will hold this phone’s data. What the other device saved will no longer be in the sheet (it stays on that device).'),
+      confirm: L('Reemplazar', 'Replace'), danger: true });
+    if (!ok) return;
+    busy(btn, async () => {
+      try { await backupNow({ force: true }); toast(L('Respaldo guardado en Google Sheets.', 'Backup saved to Google Sheets.')); } catch (err) { toast(err.message, { error: true }); }
+      rerender();
+    });
+  });
+  box.querySelectorAll('[data-restore-sheets], [data-resolve="pull"]').forEach((b) => b.addEventListener('click', async () => {
     let cfg = sheetsConfig();
     let url = cfg?.url, clave = cfg?.clave;
     if (!url) {
@@ -189,7 +212,9 @@ export function bindSheets(main, rerender) {
         confirm: L('Restaurar', 'Restore'), danger: true });
       if (!ok) return;
       const r = await E.restoreFull(backup);
-      if (!cfg?.url) E.setSetting('sheets', { url, clave, auto: true, lastAt: fecha });
+      // Desde ahora este dispositivo conoce ese respaldo: ya no se considera un conflicto.
+      E.setSetting('sheets', { ...(cfg || { auto: true }), url, clave, lastAt: fecha, lastRemoteAt: fecha, conflict: null, lastError: null });
+      await E.flush();
       toast(L(`Listo: se restauraron ${r.households} hogar(es).`, `Done: ${r.households} household(s) restored.`));
       localStorage.removeItem('jp-hid');
       location.hash = '#/inicio'; location.reload();

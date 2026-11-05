@@ -1,6 +1,12 @@
 // Respaldo en Google Sheets mediante un Apps Script publicado por la propia persona en su cuenta de Google.
 // Se envía el respaldo completo (para restaurar) y pestañas legibles: Movimientos, Cuentas, Presupuesto, Facturas, Metas y Deudas.
 import { fullBackup, getSetting, setSetting, onMutation, request } from './engine.js';
+import { deviceInfo, conflictWith } from './sync-check.js';
+
+// Otro dispositivo guardó en la hoja después de nuestra última sincronización: hay que preguntar.
+export class SheetsConflict extends Error {
+  constructor(info) { super(`Otro dispositivo (${info.nombre}) guardó datos en la hoja. Elige qué hacer antes de respaldar.`); this.info = info; }
+}
 
 const TYPE = { income: 'Ingreso', expense: 'Gasto', refund: 'Devolución', transfer: 'Transferencia' };
 const ACC = { cash: 'Efectivo', bank: 'Cuenta bancaria', savings: 'Ahorros', credit: 'Tarjeta de crédito' };
@@ -60,19 +66,32 @@ async function buildTables(backup) {
 }
 
 let running = null;
-export async function backupNow() {
+// force = true solo cuando la persona eligió reemplazar la hoja con los datos de este dispositivo.
+export async function backupNow({ force = false } = {}) {
   const cfg = sheetsConfig();
   if (!cfg?.url) throw new Error('Primero conecta tu hoja de Google.');
   if (running) return running;
   running = (async () => {
     try {
+      const device = deviceInfo();
+      if (!force) {
+        const remote = await call(cfg.url, { accion: 'estado', clave: cfg.clave }).catch((e) => {
+          if (/desconocida/.test(e.message)) throw new Error('Actualiza el código del Apps Script de tu hoja (hay una versión nueva) y vuelve a implementarlo.');
+          throw e;
+        });
+        const conflict = conflictWith(remote, cfg, device.id);
+        if (conflict) {
+          setSetting('sheets', { ...sheetsConfig(), conflict, lastError: null });
+          throw new SheetsConflict(conflict);
+        }
+      }
       const backup = await fullBackup();
       const tablas = await buildTables(backup);
-      const r = await call(cfg.url, { accion: 'respaldar', clave: cfg.clave, respaldo: JSON.stringify(backup), tablas });
-      setSetting('sheets', { ...sheetsConfig(), lastAt: new Date().toISOString(), lastError: null });
+      const r = await call(cfg.url, { accion: 'respaldar', clave: cfg.clave, respaldo: JSON.stringify(backup), tablas, dispositivo: { id: device.id, nombre: device.name } });
+      setSetting('sheets', { ...sheetsConfig(), lastAt: new Date().toISOString(), lastRemoteAt: r.fecha, conflict: null, lastError: null });
       return r;
     } catch (e) {
-      setSetting('sheets', { ...sheetsConfig(), lastError: e.message, lastErrorAt: new Date().toISOString() });
+      if (!(e instanceof SheetsConflict)) setSetting('sheets', { ...sheetsConfig(), lastError: e.message, lastErrorAt: new Date().toISOString() });
       throw e;
     } finally { running = null; }
   })();
@@ -81,18 +100,18 @@ export async function backupNow() {
 
 export async function fetchRemoteBackup(url, clave) {
   const r = await call(url, { accion: 'restaurar', clave });
-  try { return { fecha: r.fecha, backup: JSON.parse(r.respaldo) }; } catch { throw new Error('El respaldo guardado en la hoja está incompleto.'); }
+  try { return { fecha: r.fecha, nombre: r.nombre, backup: JSON.parse(r.respaldo) }; } catch { throw new Error('El respaldo guardado en la hoja está incompleto.'); }
 }
 
 // Respaldo automático: unos segundos después del último cambio, si hay conexión.
 let timer = null;
 onMutation(() => {
   const cfg = sheetsConfig();
-  if (!cfg?.url || !cfg.auto) return;
+  if (!cfg?.url || !cfg.auto || cfg.conflict) return;   // con conflicto pendiente no se respalda solo
   clearTimeout(timer);
   timer = setTimeout(() => { if (navigator.onLine) backupNow().catch(() => {}); }, 15000);
 });
 window.addEventListener('online', () => {
   const cfg = sheetsConfig();
-  if (cfg?.url && cfg.auto && cfg.lastError) backupNow().catch(() => {});
+  if (cfg?.url && cfg.auto && cfg.lastError && !cfg.conflict) backupNow().catch(() => {});
 });

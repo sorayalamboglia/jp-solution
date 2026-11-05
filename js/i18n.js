@@ -349,6 +349,12 @@ const EN = [
   ['La dirección debe ser la de la aplicación web del Apps Script (termina en /exec).', 'The address must be the Apps Script web app address (ends in /exec).'], ['El respaldo guardado en la hoja está incompleto.', 'The backup saved in the sheet is incomplete.'],
   ['Todavía no hay ningún respaldo guardado en esta hoja.', 'There’s no backup saved in this sheet yet.'], ['{#0} movimiento', '{0} transaction'],
 
+  ['Respaldo en pausa.', 'Backup paused.'], ['El {0} otro dispositivo ({1}) guardó datos en esta hoja. Para no borrar nada, elige qué hacer:', 'On {0} another device ({1}) saved data to this sheet. So nothing gets erased, choose what to do:'],
+  ['Traer los datos de la hoja a este teléfono', 'Bring the sheet’s data to this phone'], ['Reemplazar la hoja con los datos de este teléfono', 'Replace the sheet with this phone’s data'],
+  ['Traer: este teléfono queda igual que la hoja. Reemplazar: la hoja queda igual que este teléfono y lo que guardó el otro dispositivo deja de estar en la hoja.', 'Bring: this phone ends up the same as the sheet. Replace: the sheet ends up the same as this phone, and what the other device saved is no longer in the sheet.'],
+  ['Otro dispositivo ({0}) guardó datos en la hoja. Elige qué hacer antes de respaldar.', 'Another device ({0}) saved data to the sheet. Choose what to do before backing up.'],
+  ['Actualiza el código del Apps Script de tu hoja (hay una versión nueva) y vuelve a implementarlo.', 'Update your sheet’s Apps Script code (there’s a new version) and deploy it again.'],
+
 ];
 
 const NUM = '[−\\-+]?(?:US)?\\$?\\s?[\\d.,]+\\s?%?';

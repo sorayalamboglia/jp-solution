@@ -16,6 +16,14 @@ function doPost(e) {
 
     if (req.accion === 'probar') return salida({ ok: true, hoja: libro.getName() });
 
+    // Quién y cuándo guardó el último respaldo (para no pisar datos de otro dispositivo).
+    if (req.accion === 'estado') {
+      const hoja = libro.getSheetByName('_respaldo');
+      if (!hoja || hoja.getLastRow() < 2) return salida({ ok: true, fecha: null });
+      const m = hoja.getRange(1, 1, 1, 3).getValues()[0];
+      return salida({ ok: true, fecha: String(m[0]), id: String(m[1] || ''), nombre: String(m[2] || '') });
+    }
+
     if (req.accion === 'respaldar') {
       // Respaldo completo, en trozos de texto (una celda admite hasta 50 000 caracteres).
       const hoja = libro.getSheetByName('_respaldo') || libro.insertSheet('_respaldo');
@@ -26,6 +34,8 @@ function doPost(e) {
       const rango = hoja.getRange(1, 1, filas.length, 1);
       rango.setNumberFormat('@');
       rango.setValues(filas);
+      const disp = req.dispositivo || {};
+      hoja.getRange(1, 2, 1, 2).setNumberFormat('@').setValues([[String(disp.id || ''), String(disp.nombre || '')]]);
       hoja.hideSheet();
       // Pestañas para leer cómodamente.
       const tablas = req.tablas || {};
@@ -47,7 +57,8 @@ function doPost(e) {
       if (!hoja || hoja.getLastRow() < 2) return salida({ ok: false, error: 'Todavía no hay ningún respaldo guardado en esta hoja.' });
       const valores = hoja.getRange(2, 1, hoja.getLastRow() - 1, 1).getValues();
       const texto = valores.map(function (f) { return String(f[0]).slice(1); }).join('');
-      return salida({ ok: true, fecha: String(hoja.getRange(1, 1).getValue()), respaldo: texto });
+      const m = hoja.getRange(1, 1, 1, 3).getValues()[0];
+      return salida({ ok: true, fecha: String(m[0]), id: String(m[1] || ''), nombre: String(m[2] || ''), respaldo: texto });
     }
 
     return salida({ ok: false, error: 'Acción desconocida' });
