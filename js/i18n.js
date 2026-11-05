@@ -370,7 +370,8 @@ for (const [es, en] of EN) {
 const lowerExact = new Map([...exact].map(([k, v]) => [k.toLowerCase(), v]));
 
 let lang = 'es';
-try { lang = localStorage.getItem('jp-lang') || ((navigator.language || 'es').toLowerCase().startsWith('en') ? 'en' : 'es'); } catch { /* sin almacenamiento */ }
+// Español por defecto; la persona puede cambiar a inglés en el Menú o en la pantalla de inicio.
+try { lang = localStorage.getItem('jp-lang') || 'es'; } catch { /* sin almacenamiento */ }
 export const getLang = () => lang;
 // Texto elegido según el idioma, para frases que se arman con datos.
 export const L = (es, en) => (lang === 'en' ? en : es);
